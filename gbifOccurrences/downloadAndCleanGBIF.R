@@ -8,7 +8,9 @@
 # checkpointed to disk as .rds files. If the script dies partway through and
 # you re-run it, it will skip any stage whose checkpoint file already exists,
 # rather than re-downloading or re-cleaning from scratch. Delete a checkpoint
-# file (or set FORCE_RERUN <- TRUE below) to force that stage to redo.
+# file (or set FORCE_RERUN <- TRUE below) to force that stage to redo. 
+# Number of occurrences after each filtering steps is tracked in the 
+# filtering_summary_by_species.csv output file.
 #
 # Steps:
 #   1. Read a species list, match to GBIF backbone accepted taxon keys.
@@ -32,12 +34,12 @@
 #   GBIF_PWD=your_password
 #   GBIF_EMAIL=your_email@example.com
 # ==============================================================================
-pacman::p_load(rgbif, taxize, CoordinateCleaner, dplyr, countrycode, 
-               readr, purrr, tibble, future, furrr, tidyr, rnaturalearth)
+pacman::p_load(rgbif, taxize, CoordinateCleaner, dplyr, tidyr, countrycode,
+               readr, purrr, tibble, future, furrr, rnaturalearth)
 
 # %%% 1. Parameters ---------------------------------------------------------------
 setwd('/home/akoontz/Documents/Indicators/Walder_Indicators/Code/gbifOccurrences/')
-species_file <- "speciesLists/SpeciesList_2026-10-07_3n.csv"   # one species name per row, no header
+species_file <- "speciesLists/SpeciesList_2026-10-30_11n.csv"   # one species name per row, no header
 out_dir      <- "gbif_clean_output"
 dir.create(out_dir, showWarnings = FALSE)
 year_range <- c(1975, 2025)
@@ -83,7 +85,9 @@ log_msg(length(species_list), " species read from ", species_file)
 # Synonyms are still enumerated explicitly below (via GBIF's own backbone, 
 # not an external service) purely to have a documented record of what was folded in.
 log_msg("Matching ", length(species_list), " names to GBIF backbone...")
+
 backbone <- name_backbone_checklist(species_list)
+
 # If there are any unmatched names, write these to a CSV
 unmatched <- backbone %>% filter(matchType %in% c("NONE", "HIGHERRANK"))
 if (nrow(unmatched) > 0) {
@@ -163,6 +167,7 @@ log_msg(length(gbif_keys), " unique GBIF accepted taxon keys will be queried ",
 # species at once. If a previous run already completed the download, skip
 # straight to loading the saved raw data (Step 6).
 raw_rds <- file.path(out_dir, "GBIF_occurrences_raw.rds")
+
 if (file.exists(raw_rds) && !FORCE_RERUN) {
   log_msg("Found existing raw download at ", raw_rds, " -- loading from disk (skipping GBIF download)")
   dat_raw <- readRDS(raw_rds)
@@ -174,7 +179,7 @@ if (file.exists(raw_rds) && !FORCE_RERUN) {
     pred_lte("year", year_range[2]),
     pred("hasCoordinate", TRUE),
     pred("hasGeospatialIssue", FALSE),
-    pred_not(pred_in("basisOfRecord", c("FOSSIL_SPECIMEN", "LIVING_SPECIMEN"))),  # exclude fossils and ex situ (zoo/garden) specimens
+    pred_not(pred_in("basisOfRecord", c("FOSSIL_SPECIMEN", "LIVING_SPECIMEN", "MATERIAL_SAMPLE"))),  # exclude fossils, ex situ (zoo/garden) specimens, and DNA samples
     format = "DWCA"
   )
   log_msg("Download submitted: ", download_key,
@@ -200,6 +205,23 @@ dat <- dat_raw %>%
          dataGeneralizations, informationWithheld) %>%
   filter(!is.na(decimalLongitude), !is.na(decimalLatitude))
 
+# Helper: per-species occurrence count (used throughout for filtering summary)
+count_by_species <- function(df) {
+  df %>% group_by(species) %>% summarise(n = n(), .groups = "drop") %>%
+    tibble::deframe()
+}
+step_counts <- list()
+
+# %%% 6a. Remove MATERIAL_SAMPLE records (DNA samples) ----------------------------
+# These are excluded server-side in the download predicate, but this post-download
+# filter catches them if reusing a cached .rds from an earlier run.
+n_matsamp <- sum(dat$basisOfRecord == "MATERIAL_SAMPLE", na.rm = TRUE)
+if (n_matsamp > 0) {
+  log_msg(n_matsamp, " MATERIAL_SAMPLE records removed (DNA samples)")
+  dat <- dat %>% filter(basisOfRecord != "MATERIAL_SAMPLE")
+}
+step_counts[["after_material_sample"]] <- count_by_species(dat)
+
 # %%% 6b. Filter records with obscured/generalized coordinates for geoprivacy ---
 # Matches common phrases data providers use when coordinates have been
 # randomized, generalized, or obscured for sensitive-species protection.
@@ -210,7 +232,6 @@ geoprivacy_pattern <- paste(
   "location.*withheld", "geoprivacy", "sensitive.*species",
   sep = "|"
 )
-
 dat$geoprivacy_flag <- grepl(geoprivacy_pattern, dat$dataGeneralizations, ignore.case = TRUE) |
   grepl(geoprivacy_pattern, dat$informationWithheld, ignore.case = TRUE)
 
@@ -246,13 +267,6 @@ log_msg(nrow(dat), " records ready for cleaning")
 # sequentially here. Each test is run individually so per-species counts can be
 # recorded for the filtering summary.
 log_msg("Running record-level CoordinateCleaner tests...")
-
-# Helper: per-species occurrence count
-count_by_species <- function(df) {
-  df %>% group_by(species) %>% summarise(n = n(), .groups = "drop") %>%
-    tibble::deframe()
-}
-step_counts <- list()
 step_counts[["after_geoprivacy"]] <- count_by_species(dat)
 
 clean <- cc_val(dat)
@@ -282,11 +296,19 @@ step_counts[["after_cc_zero"]] <- count_by_species(clean)
 clean <- cc_dupl(clean)
 step_counts[["after_cc_dupl"]] <- count_by_species(clean)
 
+# cc_inst: flag records near known biodiversity institutions (botanical gardens,
+# herbaria, zoos, museums) to remove likely ex situ / cultivated observations
+clean <- cc_inst(clean, value = "clean", verbose = TRUE)
+step_counts[["after_cc_inst"]] <- count_by_species(clean)
+
 log_msg(nrow(dat) - nrow(clean), " records removed by record-level tests; ", nrow(clean), " remaining")
 
 # %%% 7b. cc_outl(), parallelized by species -------------------------------------
 # cc_outl() evaluates each species' records independently (distance to that
-# species' other points).
+# species' other points). Removes outliers in geographic space. Here, we use the default method argument
+# in the cc_outl command below ("quantile": a boxplot method is used and records are flagged as outliers 
+# if their mean distance to all other records of the same species is larger than mltpl * the interquartile 
+# range of the mean distance of all records of this species. We use default mltpl value of 5)
 outl_rds <- file.path(out_dir, "cc_outl_flags.rds")
 
 if (file.exists(outl_rds) && !FORCE_RERUN) {
@@ -435,7 +457,6 @@ filtering_summary$raw_download <- raw_counts[filtering_summary$species]
 for (step_name in names(step_counts)) {
   filtering_summary[[step_name]] <- step_counts[[step_name]][filtering_summary$species]
 }
-
 # Replace NAs with 0 (species lost at that step have no rows remaining)
 filtering_summary <- filtering_summary %>%
   mutate(across(-species, ~ replace_na(.x, 0L)))
