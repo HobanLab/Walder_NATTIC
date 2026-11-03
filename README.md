@@ -1,5 +1,5 @@
 # Overview
-This repository stroes the scripts used for the Walder North American Tree Indicator Calculations (NATIC) project.
+This repository stroes the scripts used for the Walder North American Trinational Tree Indicator Calculations (NATTIC) project.
 
 Currently, these scripts are divided based on functionality: one set of script (`gbifOccurrences`) is used for 
 cleaning and downloading species occurrences from [GBIF](https://www.gbif.org/), and writing these to CSVs (to be used for "automatic"
