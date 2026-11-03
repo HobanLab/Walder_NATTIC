@@ -297,8 +297,9 @@ clean <- cc_dupl(clean)
 step_counts[["after_cc_dupl"]] <- count_by_species(clean)
 
 # cc_inst: flag records near known biodiversity institutions (botanical gardens,
-# herbaria, zoos, museums) to remove likely ex situ / cultivated observations
-clean <- cc_inst(clean, value = "clean", verbose = TRUE)
+# herbaria, zoos, museums) to remove likely ex situ / cultivated observations. Buffer size
+# is expanded from default.
+clean <- cc_inst(clean, value = "clean", buffer = 1000, verbose = TRUE)
 step_counts[["after_cc_inst"]] <- count_by_species(clean)
 
 log_msg(nrow(dat) - nrow(clean), " records removed by record-level tests; ", nrow(clean), " remaining")
@@ -408,20 +409,34 @@ if (file.exists(dataset_rds) && !FORCE_RERUN) {
   ddmm_flags   <- flags_all$ddmm_flag
   round_flags  <- flags_all$round_flag
   
-  # Map datasetKey -> species name(s) so the CSV is easier to interpret
+  # Map datasetKey -> species name(s) and dataset title so the CSVs are easier to interpret
   ds_species_map <- clean %>%
     distinct(datasetKey, species) %>%
     group_by(datasetKey) %>%
     summarise(species_names = paste(species, collapse = "; "), .groups = "drop")
+  
+  # Look up human-readable dataset titles from GBIF
+  log_msg("Looking up dataset titles from GBIF for ", length(unique(clean$datasetKey)), " datasets...")
+  ds_titles <- tibble(datasetKey = unique(clean$datasetKey)) %>%
+    mutate(dataset_title = map_chr(datasetKey, function(k) {
+      tryCatch({
+        info <- rgbif::datasets(uuid = k)
+        info$data$title %||% k
+      }, error = function(e) k)
+    }))
+  
+  ds_info <- ds_species_map %>% left_join(ds_titles, by = "datasetKey")
+  
   if (!is.null(ddmm_report) && nrow(ddmm_report) > 0 && "datasetKey" %in% names(ddmm_report)) {
     ddmm_report <- ddmm_report %>%
-      left_join(ds_species_map, by = "datasetKey") %>%
-      relocate(species_names, .before = 1)
+      left_join(ds_info, by = "datasetKey") %>%
+      relocate(dataset_title, species_names, .before = 1)
   }
   if (!is.null(round_report) && nrow(round_report) > 0 && "datasetKey" %in% names(round_report)) {
     round_report <- round_report %>%
-      left_join(ds_species_map, by = "datasetKey") %>%
-      relocate(species_names, .before = 1)
+      left_join(ds_info, by = "datasetKey") %>%
+      select(-dataset) %>%
+      relocate(dataset_title, species_names, .before = 1)
   }
   write_csv(ddmm_report, file.path(out_dir, "ddmm_conversion_flags_by_dataset.csv"))
   write_csv(round_report, file.path(out_dir, "rasterized_sampling_flags_by_dataset.csv"))
@@ -457,6 +472,7 @@ filtering_summary$raw_download <- raw_counts[filtering_summary$species]
 for (step_name in names(step_counts)) {
   filtering_summary[[step_name]] <- step_counts[[step_name]][filtering_summary$species]
 }
+
 # Replace NAs with 0 (species lost at that step have no rows remaining)
 filtering_summary <- filtering_summary %>%
   mutate(across(-species, ~ replace_na(.x, 0L)))
