@@ -265,37 +265,40 @@ log_msg(nrow(dat), " records ready for cleaning")
 # cc_val/cc_equ/cc_cap/cc_cen/cc_coun/cc_sea/cc_zero/cc_dupl are single
 # vectorized passes over the whole table (not per-species loops), so they run
 # sequentially here. Each test is run individually so per-species counts can be
-# recorded for the filtering summary.
+# recorded for the filtering summary. 
 log_msg("Running record-level CoordinateCleaner tests...")
 step_counts[["after_geoprivacy"]] <- count_by_species(dat)
-
+# Filter occurrences with invalid latitude/longitude coordinates
 clean <- cc_val(dat)
 step_counts[["after_cc_val"]] <- count_by_species(clean)
-
+# Filter occurrences with equal latitude and longitude coordinates, either exact or absolute
 clean <- cc_equ(clean)
 step_counts[["after_cc_equ"]] <- count_by_species(clean)
-
+# Filter occurrences with within a certain radius around country capitals
 clean <- cc_cap(clean)
 step_counts[["after_cc_cap"]] <- count_by_species(clean)
-
+# Filter occurrences within a radius around the geographic centroids of political countries and provinces.
 clean <- cc_cen(clean)
 step_counts[["after_cc_cen"]] <- count_by_species(clean)
-
-clean <- cc_coun(clean, iso3 = "countryCode")
+# Filter occurrences with mismatches between geographic coordinates and additional country information 
+# Use 1:10m country and land polygons so that smaller islands (e.g. Channel Islands,
+# Guadalupe Island, Caribbean) are included and their occurrences are not falsely
+# flagged by cc_coun.
+countries_10m <- ne_download(scale = 10, type = "countries", category = "cultural", returnclass = "sf")
+clean <- cc_coun(clean, iso3 = "countryCode", ref = countries_10m)
 step_counts[["after_cc_coun"]] <- count_by_species(clean)
-
+# Filter occurrences with coordinates outside the reference landmass
 # Use 1:10m land polygons so that smaller islands (e.g. Channel Islands, Caribbean)
 # are included and their occurrences are not falsely flagged as at-sea.
 land_10m <- ne_download(scale = 10, type = "land", category = "physical", returnclass = "sf")
 clean <- cc_sea(clean, ref = land_10m)
 step_counts[["after_cc_sea"]] <- count_by_species(clean)
-
+# Filter occurrences  with either zero longitude or latitude and a radius around the point at zero longitude and zero latitude
 clean <- cc_zero(clean)
 step_counts[["after_cc_zero"]] <- count_by_species(clean)
-
+# Filter duplicated occurrences based on species name and coordinates, as well as user-defined additional columns.
 clean <- cc_dupl(clean)
 step_counts[["after_cc_dupl"]] <- count_by_species(clean)
-
 # cc_inst: flag records near known biodiversity institutions (botanical gardens,
 # herbaria, zoos, museums) to remove likely ex situ / cultivated observations. Buffer size
 # is expanded from default.
