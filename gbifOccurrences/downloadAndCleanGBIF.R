@@ -285,7 +285,7 @@ step_counts[["after_cc_cen"]] <- count_by_species(clean)
 # Guadalupe Island, Caribbean) are included and their occurrences are not falsely
 # flagged by cc_coun.
 countries_10m <- ne_download(scale = 10, type = "countries", category = "cultural", returnclass = "sf")
-clean <- cc_coun(clean, iso3 = "countryCode", ref = countries_10m)
+clean <- cc_coun(clean, iso3 = "countryCode", ref = countries_10m, ref_col = "ISO_A3_EH")
 step_counts[["after_cc_coun"]] <- count_by_species(clean)
 # Filter occurrences with coordinates outside the reference landmass
 # Use 1:10m land polygons so that smaller islands (e.g. Channel Islands, Caribbean)
