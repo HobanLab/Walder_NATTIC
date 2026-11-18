@@ -19,7 +19,7 @@ library(rnaturalearth)  # For urban area polygons (Natural Earth, 1:10m)
 # READ IN CSV ----
 # Specify the file path to the relevant CSV below
 csvFile <- 
-  '/home/akoontz/Documents/Indicators/Walder_Indicators/Scripts/GBIF_occurrences/2026-08-19_NATIClist/species_csvs/Austin/Styrax_platanifolius_241n_2026-08-19.csv'
+  '/home/akoontz/Documents/Indicators/NATTIC/Code/gbifOccurrences/runResults/outlierTest_2026-11-17/species_csvs/Alnus_maritima_25n_2026-11-17.csv'
 pts <- read.csv(file=csvFile, header=TRUE)  
 names(pts)  # Check names of columns with the lat/long
 # Build GBIF record URL for each occurrence 
@@ -127,8 +127,3 @@ layers <- list(
 outlierMap <- Reduce(`+`, Filter(Negate(is.null), layers), baseMap)
 outlierMap
 # Click on each point to see its attributes, including nnDist_km and flagReason
-
-# SAVE OUT (STEPS WHEN USING RSTUDIO) ----
-# in figure panel, choose 'export' -> 'save as web page' ; this creates an html file
-# with the html file downloaded locally (i.e., does not work if file is in an online shared folder), 
-# open the html file in a browser. This is your interactive map!
