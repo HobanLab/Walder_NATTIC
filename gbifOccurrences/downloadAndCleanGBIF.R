@@ -35,14 +35,14 @@
 #   GBIF_EMAIL=your_email@example.com
 # ==============================================================================
 pacman::p_load(rgbif, taxize, CoordinateCleaner, dplyr, tidyr, countrycode,
-               readr, purrr, tibble, future, furrr, rnaturalearth)
+               readr, purrr, tibble, future, furrr, rnaturalearth, geosphere)
 
 # %%% 1. Parameters ---------------------------------------------------------------
-setwd('/home/akoontz/Documents/Indicators/Walder_Indicators/Code/gbifOccurrences/')
-species_file <- "speciesLists/SpeciesList_2026-10-30_11n.csv"   # one species name per row, no header
-out_dir      <- "gbif_clean_output"
+setwd('/home/akoontz/Documents/Indicators/NATTIC/Code/gbifOccurrences/')
+species_file <- "speciesLists/SpeciesList_2026-11-17_33n.csv"   # one species name per row, no header
+out_dir      <- "runResults/gbif_clean_output"
 dir.create(out_dir, showWarnings = FALSE)
-year_range <- c(1975, 2025)
+year_range <- c(1976, 2026)
 
 # North America: US, Canada, Mexico + Caribbean (ISO 3166-1 alpha-2 codes)
 countries <- c(
@@ -85,7 +85,6 @@ log_msg(length(species_list), " species read from ", species_file)
 # Synonyms are still enumerated explicitly below (via GBIF's own backbone, 
 # not an external service) purely to have a documented record of what was folded in.
 log_msg("Matching ", length(species_list), " names to GBIF backbone...")
-
 backbone <- name_backbone_checklist(species_list)
 
 # If there are any unmatched names, write these to a CSV
@@ -192,8 +191,9 @@ if (file.exists(raw_rds) && !FORCE_RERUN) {
   dat_raw <- occ_download_import(dl_path)
   log_msg(nrow(dat_raw), " raw occurrence records downloaded")
   saveRDS(dat_raw, raw_rds)
-  # Save the citation 
+  # Save the citation, then remove the DWCA .zip (XML metadata not needed)
   writeLines(format(gbif_citation(dl_path)), file.path(out_dir, "gbif_citation.txt"))
+  unlink(dl_path, recursive = TRUE)
 }
 
 # %%% 6. Prepare data for cleaning ----------------------------------------------
@@ -288,8 +288,7 @@ countries_10m <- ne_download(scale = 10, type = "countries", category = "cultura
 clean <- cc_coun(clean, iso3 = "countryCode", ref = countries_10m, ref_col = "ISO_A3_EH")
 step_counts[["after_cc_coun"]] <- count_by_species(clean)
 # Filter occurrences with coordinates outside the reference landmass
-# Use 1:10m land polygons so that smaller islands (e.g. Channel Islands, Caribbean)
-# are included and their occurrences are not falsely flagged as at-sea.
+# Use 1:10m land polygons so smaller islands and their occurrences are included.
 land_10m <- ne_download(scale = 10, type = "land", category = "physical", returnclass = "sf")
 clean <- cc_sea(clean, ref = land_10m)
 step_counts[["after_cc_sea"]] <- count_by_species(clean)
@@ -307,30 +306,56 @@ step_counts[["after_cc_inst"]] <- count_by_species(clean)
 
 log_msg(nrow(dat) - nrow(clean), " records removed by record-level tests; ", nrow(clean), " remaining")
 
-# %%% 7b. cc_outl(), parallelized by species -------------------------------------
-# cc_outl() evaluates each species' records independently (distance to that
-# species' other points). Removes outliers in geographic space. Here, we use the default method argument
-# in the cc_outl command below ("quantile": a boxplot method is used and records are flagged as outliers 
-# if their mean distance to all other records of the same species is larger than mltpl * the interquartile 
-# range of the mean distance of all records of this species. We use default mltpl value of 5)
+# %%% 7b. cc_outl(), per-species with adaptive tdi --------------------------------
+# cc_outl(method = "distance") flags a record when its minimum distance to the
+# nearest conspecific exceeds `tdi` km. Rather than a single global tdi, we
+# compute a per-species threshold from the distribution of nearest-neighbor
+# distances: tdi = nn_mltpl * quantile(NN distances, nn_q). This avoids
+# removing records from disjunct but legitimate populations (e.g. island endemics).
 outl_rds <- file.path(out_dir, "cc_outl_flags.rds")
+
+# Nearest-neighbor distances (km) among unique locations of one species.
+# Exact duplicates are dropped, matching cc_outl which sets 0 distances to NA.
+nn_dist <- function(d, lon = "decimalLongitude", lat = "decimalLatitude") {
+  xy <- unique(d[, c(lon, lat)])
+  if (nrow(xy) < 2) return(NA_real_)
+  dm <- geosphere::distm(xy, fun = geosphere::distHaversine) / 1000
+  diag(dm) <- NA
+  apply(dm, 1, min, na.rm = TRUE)
+}
+# Parameters applied identically to every species
+nn_q     <- 0.75   # quantile of the species' NN distances
+nn_mltpl <- 3      # multiplier on that quantile
+min_occs <- 7      # species with fewer records skip outlier detection
 
 if (file.exists(outl_rds) && !FORCE_RERUN) {
   log_msg("Found existing cc_outl() flags at ", outl_rds, " -- loading from disk")
   outl_flags <- readRDS(outl_rds)
 } else {
-  log_msg("Running cc_outl() across ", length(unique(clean$species)),
-          " species (", N_WORKERS, " workers)...")
+  log_msg("Running cc_outl(method='distance') with adaptive tdi across ",
+          length(unique(clean$species)), " species...")
   
-  species_chunks <- split(unique(clean$species),
-                          cut(seq_along(unique(clean$species)), N_WORKERS, labels = FALSE))
+  clean$outl_flag <- TRUE
   
-  outl_results <- future_map(species_chunks, function(sp_chunk) {
-    sub <- clean[clean$species %in% sp_chunk, ]
-    flags <- cc_outl(sub, species = "species", value = "flagged", verbose = FALSE)
-    tibble(row_id = sub$row_id, outl_flag = flags)
-  }, .progress = FALSE)
-  outl_flags <- bind_rows(outl_results) %>% arrange(row_id)
+  for (sp in unique(clean$species)) {
+    idx <- which(clean$species == sp)
+    d   <- clean[idx, ]
+    nn  <- nn_dist(d)
+    if (all(is.na(nn))) next
+    
+    tdi_sp <- nn_mltpl * unname(quantile(nn, nn_q, na.rm = TRUE))
+    log_msg("  ", sp, ": tdi = ", round(tdi_sp, 1), " km")
+    # Call cc_outl command, using set of custom tdi values
+    clean$outl_flag[idx] <- cc_outl(d,
+                                    species  = "species",
+                                    method   = "distance",
+                                    tdi      = tdi_sp,
+                                    min_occs = min_occs,
+                                    value    = "flagged",
+                                    verbose  = FALSE)
+  }
+  outl_flags <- tibble(row_id = clean$row_id, outl_flag = clean$outl_flag)
+  clean$outl_flag <- NULL
   saveRDS(outl_flags, outl_rds)
 }
 clean <- clean %>%
