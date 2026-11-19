@@ -1,0 +1,920 @@
+---
+title: "Genetic diversity indicators report for the GBF"
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+---
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+### Load packages and functions, this is hidden form the report
+
+# Load required libraries:
+library(tidyr)
+library(dplyr)
+library(viridis)
+library(ggplot2)
+
+# Other custom functions:
+### not in
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+# Custom colors
+
+## IUCN official colors
+# Assuming order of levels is: "re", "cr", "en", "vu", "nt", "lc", "dd", "not_assessed", "unknown" (for regional, and w/o "re" for global). Make sure to change the levels to that order before plotting.
+IUCNcolors<-c("brown2", "darkorange", "yellow", "green", "darkgreen", "darkgrey", "azure2", "bisque1")
+IUCNcolors_regional<-c("darkorchid2", "brown2", "darkorange", "yellow", "green", "darkgreen", "darkgrey", "azure2", "bisque1")
+
+## nice soft ramp for taxonomic groups
+taxoncolors<-cividis(12) # same than using cividis(length(levels(as.factor(metadata$taxonomic_group))))
+  
+
+```
+
+## Introduction to genetic diversity 
+
+Genetic diversity is variation at the DNA level, and includes differences among individuals within populations of species, as well as differences between populations of species.
+
+*Within populations*: the diversity within populations of a species helps a population adapt quickly to changing conditions, avoid inbreeding problems, and persist when environmental disturbances occur. Small populations will tend to lose genetic diversity more rapidly than large populations.
+
+*Between populations*: the diversity between populations of a species is critical for ensuring the adaptive potential of that species (e.g. to a range of environmental conditions). Loss of any unique, genetically distinct populations can compromise a species’ ability to adapt to change (anthropogenic or otherwise).
+
+It is therefore crucial that all populations be maintained, and that populations are sufficiently large to maintain genetic health. The genetic diversity indicators are based on these premises.
+
+Genetic diversity within populations can be monitored by *the proportion of populations within species with an effective population size > 500* indicator ("Ne 500 indicator").
+
+Genetic diversity between populations can be monitored by the *proportion of populations maintained within species* indicator ("PM indicator").
+
+
+## Raw data used
+
+The following files have the raw data used to produce the present report:
+
+```{r, echo=TRUE}
+# Get data:
+indicators_full<-read.csv(file="indicators_full.csv")
+indNe_data<-read.csv("indNe_data.csv")
+```
+
+
+```{r, echo=F, message=F, warning=F}
+# Optional step if you have several countries in the dataset
+
+# Select which country you want to analyse. For this after "desired_country" in the code below, write the name of your country exactly as it is written in kobo (English lowercase, no spaces use "_" instead)
+
+desired_country<-"mexico"
+
+# Subset data to desired country:
+indNe_data<-indNe_data %>% filter(country_assessment==desired_country)
+indicators_full<-indicators_full %>% filter(country_assessment==desired_country)
+
+```
+
+Which country(ies) is(are) being analysed?
+```{r, echo=F, message=F, warning=F}
+desired_country<-unique(indicators_full$country_assessment)
+desired_country
+```
+
+
+`r desired_country` has a total of `r nrow(indicators_full)` assessments (data entries in the Kobo form) where it was attempted to estimate the Ne 500 or PM indicators. These assessments where done in a total of `r length(unique(indicators_full$taxon))` taxa (species or subspecies). 
+
+The number of assessments and the number of taxa can differ, because some taxa could have been assessed more than once, for example to account for different methods to define populations.
+
+
+```{r, echo=F, message=F, warning=F}
+# To explore what kind of taxa the country assessed regardless of if they assessed them once or more, lets create a dataset keeping all single assessed taxa, plus only the first assessment for taxa assessed multiple times. 
+
+# object with single assessed taxa, plus only the first assessment for taxa assessed multiple times
+firstmulti<-indicators_full[!duplicated(cbind(indicators_full$taxon, indicators_full$country_assessment)), ]
+
+```
+
+How many taxa were assessed (i.e. counting only once taxa that were assessed multiple times)?
+
+```{r, echo=F, message=F, warning=F}
+# how many?
+nrow(firstmulti)
+```
+
+Which taxa where assessed more than once? (if any)
+
+```{r, echo=F, message=F, warning=F}
+indicators_full[duplicated(cbind(indicators_full$taxon, indicators_full$country_assessment)), ]
+```
+
+## Key results for the Global Biodiversity Framework 
+
+### Headline indicator A.4 "The proportion of populations within species with an effective population size > 500" ("Ne 500 indicator")
+
+The "Ne 500 genetic diversity indicator" adopted at the Global Biodiversity Framework relates to [Goal A](https://www.cbd.int/gbf/goals): protect and restore; and [Target 4](https://www.cbd.int/gbf/targets/4): halt species extinction, protect genetic diversity, and manage human-wildlife conflicts.
+
+Effective population size (Ne) is a well-accepted metric for measuring the genetic diversity within populations of wild species. An Ne above 500 (usually, but not always, equivalent to a census population size above 5,000) is widely viewed as sufficient to maintain genetic diversity within populations of a given species.
+
+Populations that are small in size (effective population size Ne < 500) are highly susceptible to rapid loss of genetic diversity and are at high risk of extinction due to genetic threats.
+
+See the [indicator GBF's metadata](https://www.gbf-indicators.org/metadata/headline/A-4) for more details.
+
+
+```{r, echo=F, message=F, warning=F}
+
+## Main stats to be used below
+
+# mean Ne 500 indicator for the country
+mean_ne <- mean(indicators_full$indicatorNe, na.rm = TRUE)
+
+# median Ne 500 indicator for the country
+median_ne <-median(indicators_full$indicatorNe, na.rm = TRUE)
+```
+
+
+There was enough data to estimate the Ne 500 indicator in `r sum(!is.na(indicators_full$indicatorNe))` taxa out of `r length(unique(indicators_full$taxon))` assessed. 
+
+Considering only the taxa where it was possible to estimate the Ne 500 indicator, the indicator mean value for the country is `r mean_ne`. That means that in `r round(mean_ne*100, 1)`% of the analysed populations are large enough to prevent the loss of genetic diversity.
+
+Figure 1 shows:
+
+* The total proportion of populations within each of the assessed species which have an effective population size (Ne) above 500 is shown in the bars. Each species is a bar. If a species has value of 0 it means that none of its populations is large enough to maintain genetic diversity. If a species has a vale of 1, it means that all of its populations are large enough to maintain genetic diversity (Ne > 500).
+* The average taken across all species assessed for this indicator is indicated by the vertical dashed line.
+
+
+
+#### Figure 1. Species-level proportion of populations above Ne 500
+```{r, echo=F, message=F, warning=F}
+indicators_full %>%
+  filter(!is.na(indicatorNe)) %>%
+  
+ggplot(aes(x = indicatorNe, y = reorder(taxon, indicatorNe))) + # order by indicator value
+  geom_col(fill = "#004D40") +
+  geom_vline(xintercept = mean_ne, # this is estimated in code outside of the plot, above
+             colour = "#FFC107",
+             linetype = "dashed",
+             linewidth = 0.8) +
+  geom_text(aes(label = round(indicatorNe, 2),
+                x = indicatorNe + 0.02),                 # nudge labels slightly right
+            size = 3,
+            hjust = 0) +
+                         
+  scale_x_continuous(expand = expansion(mult = c(0, 0.02)),
+                     limits = c(0, 1)) +                 # adjust if indicatorNe is 0–1
+
+  labs(
+    x = "Proportion of populations within species > 500 Ne",
+    y = "",
+    title = ""
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.y = element_text(size = 9, face="italic")
+  )
+```
+
+#### Figure 2. The frequency distribution of the Ne 500 indicator
+
+This figure shows how the indicator value is distributed across all species. A bias towards the right (indicator value of 0) mean that in the majority of species all populations are too small to retain genetic diversity.
+
+
+```{r, echo=F, message=F, warning=F}
+
+indicators_full %>%
+  filter(!is.na(indicatorNe)) %>%
+                  ggplot(aes(x = indicatorNe)) +
+                  geom_histogram(fill="#004D40") + # Adjust the number of bins as needed
+                  labs(x = "Proportion of populations within species with Ne>500 \n(Ne 500 indicator)", y = "Frequency") +
+
+                  theme_light() +
+                  theme(panel.border = element_blank(), text = element_text(size = 15), 
+                        legend.position = "right") +
+                  guides(fill = guide_legend(title = NULL))
+
+```
+
+### Complementary indicator to Goal A "Proportion of populations maintained within species" ("PM indicator")
+
+In addition to the importance of within population genetic diversity, the diversity between populations is also critical. The populations maintained (PM) indicator measures the proportion of populations that still exist compared to the total number of populations that used to occur (i.e., it is a way of quantifying population extinctions). Each population is presumed to be genetically distinct and locally adapted–for example, due to harboring genetic variants that are either absent or rare in other populations. Therefore, loss of any population within a species equates to the loss of unique genetic diversity. 
+
+```{r, echo=F, message=F, warning=F}
+
+## Main stats to be used below
+
+# mean Ne 500 indicator for the country
+mean_PM <- mean(indicators_full$indicatorPM, na.rm = TRUE)
+
+# median Ne 500 indicator for the country
+median_PM <-median(indicators_full$indicatorPM, na.rm = TRUE)
+```
+
+There was enough data to estimate the PM indicator in `r sum(!is.na(indicators_full$indicatorPM))` taxa out of `r length(unique(indicators_full$taxon))` assessed. 
+
+Considering only the taxa where it was possible to estimate the Ne 500 indicator, the indicator mean value for the country is `r mean_PM`. That means that in the analysed species `r round(mean_PM*100, 1)`% of their populations are still existing.
+
+#### Figure 3. Species-level proportion of populations above Ne 500
+```{r, echo=F, message=F, warning=F}
+indicators_full %>%
+  filter(!is.na(indicatorPM)) %>%
+  
+  ggplot(aes(x = indicatorPM, y = reorder(taxon, indicatorPM))) + # order by indicator value
+  geom_col(fill = "#004D40") +
+  geom_vline(xintercept = mean_PM, # this is estimated in code outside of the plot, above
+             colour = "#FFC107",
+             linetype = "dashed",
+             linewidth = 0.8) +
+  geom_text(aes(label = round(indicatorPM, 2),
+                x = indicatorPM + 0.02),                 # nudge labels slightly right
+            size = 3,
+            hjust = 0) +
+  
+  scale_x_continuous(expand = expansion(mult = c(0, 0.02)),
+                     limits = c(0, 1)) +                 # adjust if indicatorPM is 0–1
+  
+  labs(
+    x = "Proportion of populations maintained within species",
+    y = "",
+    title = ""
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    axis.text.y = element_text(size = 9, face="italic")
+  )
+
+```
+
+#### Figure 4. The frequency distribution of the Ne 500 indicator
+
+This figure shows how the indicator value is distributed across all assessed species. A bias towards the left (indicator value of 1) mean that in the majority of species all populations are still maintained (not extinct).
+
+
+```{r, echo=F, message=F, warning=F}
+
+indicators_full %>%
+  filter(!is.na(indicatorPM)) %>%
+  ggplot(aes(x = indicatorPM)) +
+  geom_histogram(fill="#004D40") + # Adjust the number of bins as needed
+  labs(x = "Proportion of populations maintained within species", y = "Frequency") +
+  
+  theme_light() +
+  theme(panel.border = element_blank(), text = element_text(size = 15), 
+        legend.position = "right") +
+  guides(fill = guide_legend(title = NULL))
+
+```
+
+
+## Extra plots for detailed inspection of results
+
+### General description of the dataset
+
+### Taxonomic groups and endemicity
+
+
+```{r, echo=F, message=F, warning=F, out.width="700px", out.height="400px"}
+ggplot(indicators_full, aes(x=taxonomic_group, fill=national_endemic)) + 
+  geom_bar(stat = "count") +
+  xlab("") +
+  ggtitle("Number of taxa by taxonomic groups and endemicity") +
+  theme_light() +
+  theme(legend.position="bottom")
+
+```
+### Proportion of species distribution within the country
+
+```{r, echo=F, message=F, warning=F, out.width="700px", out.height="400px"}
+ggplot(indicators_full, aes(x=taxonomic_group, fill=country_proportion)) + 
+  geom_bar(stat = "count") +
+  xlab("") +
+  ggtitle("Number of taxa by taxonomic groups and proportion \nof taxon distribution within the country") +
+  theme_light() +
+  theme(legend.position="bottom")
+
+```
+
+### Realm and habitat
+
+Plot by Realm
+
+```{r, echo=F, message=F, warning=F}
+ggplot(indicators_full, aes(x=taxonomic_group, fill=realm)) + 
+  geom_bar(stat = "count") +
+  xlab("") +
+  ggtitle("Number of taxa by taxonomic groups and realm") +
+  theme_light() +
+  theme(legend.position="bottom")
+```
+
+Habytat type as IUCN categories (a species can inhabit more than one type of habitat, that is why there are so many groups):
+
+
+```{r, echo=F, message=F, warning=F}
+ggplot(indicators_full, aes(x=taxonomic_group, fill=IUCN_habitat)) + 
+  geom_bar(stat = "count") +
+  xlab("") +
+  ggtitle("Number of taxa by taxonomic groups and habitat") +
+  theme_light() +
+  theme(legend.position="bottom")
+```
+
+
+### Population size data availability
+
+Population size (Nc or Ne) data availability at the taxon level:
+
+```{r, echo=F, message=F, warning=F}
+ggplot(indicators_full, aes(x=taxonomic_group, fill=popsize_data)) + 
+  geom_bar(stat = "count") +
+  coord_flip() +
+  scale_fill_manual(values=c("#2ca02c", "#1f77b4", "grey80"),
+                    breaks=c("yes", "data_for_species", "insuff_data_species"),
+                    labels=c("Population level", "Species or subspecies level", "Insufficient data")) +
+  labs(fill="Population size data availability",
+       x="",
+       y="Number of taxa (including records of taxa assessed more than once)") +
+  theme_light() +
+  theme(panel.border = element_blank(), legend.position="top")
+  
+```
+
+Ne available?
+
+```{r, echo=F, message=F, warning=F}
+indicators_full %>% 
+  filter(!is.na(ne_pops_exists)) %>% 
+  filter(ne_pops_exists!="other_genetic_info") %>%
+    ggplot(aes(x=taxonomic_group, fill=ne_pops_exists)) + 
+  geom_bar() +
+  coord_flip() +
+scale_fill_manual(labels=c("no", "yes"),
+                      breaks=c("no_genetic_data", "ne_available"),
+                      values=c("#ff7f0e", "#2ca02c")) +
+xlab("") +
+ylab("Number of taxa") +
+labs(fill="Ne available \n(from genetic data)")  +
+theme_light() +
+theme(text = element_text(size = 14), legend.position = "right", panel.border = element_blank())
+
+
+```
+
+Nc data available by taxa?
+
+```{r, echo=F, message=F, warning=F}
+indicators_full %>%
+  filter(!is.na(nc_pops_exists)) %>%
+    ggplot(aes(x=taxonomic_group, fill=nc_pops_exists)) +
+    geom_bar() +
+    coord_flip() +
+    scale_fill_manual(values=c("#ff7f0e", "#2ca02c")) + 
+    labs(fill="Nc available") +
+    xlab("") +
+    ylab("Number of taxa") +
+    theme_light() +
+    theme(text = element_text(size = 14), legend.position = "right", panel.border = element_blank())
+```
+
+What kind of Nc data?
+
+```{r, echo=F, message=F, warning=F}
+indNe_data %>%
+  filter(!is.na(NcType)) %>%
+  ggplot(aes(x=taxonomic_group, fill=NcType))+
+  geom_bar() +
+  scale_fill_manual(labels=c("Point", "Range \nor qualitative", "Unknown"),
+                      breaks=c("Nc_point", "Nc_range", "unknown"),
+                      values=c("#0072B2", "#E69F00", "grey80")) +
+  xlab("") +
+  ylab("Number of populations") +
+  coord_flip() +
+  labs(fill="Type of Nc data \nby population") +
+  theme_light() +
+  theme(text = element_text(size = 14), legend.position = "right", panel.border = element_blank())
+ 
+```
+
+
+
+### Methods used to define populations
+Frequency table of methods used to define population
+```{r, echo=F, message=F, warning=F}
+table(indicators_full$defined_populations)
+```
+
+### Plot number of populations by method
+```{r, echo=F, message=F, warning=F, out.height="500px", out.width="1064px"}
+# Prepare data for plot with nice labels:
+# sample size of TOTAL populations
+sample_size <- indicators_full %>%
+                    filter(!is.na(indicatorPM)) %>% 
+                    group_by(defined_populations) %>% summarize(num=n())
+
+# custom axis
+## new dataframe
+df<-indicators_full %>% 
+  filter(!is.na(indicatorPM)) %>%
+  filter(n_extant_populations<500) %>%
+    # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(defined_populations, " (n= ", num, ")"))
+
+
+# plot for number of pops
+df %>%
+  ggplot(aes(x=myaxis, y=n_extant_populations, color=defined_populations)) +
+          geom_boxplot() + xlab("") + ylab("Number of mantained populations") +
+          geom_jitter(size=.4, width = 0.1, color="black") +
+  coord_flip() +
+  theme_light() +
+  theme(panel.border = element_blank(), legend.position="none",
+        plot.margin = unit(c(0, 0, 0, 0), "cm")) + # this is used to decrease the space between plots
+  scale_x_discrete(limits=rev) +  
+  theme(text = element_text(size = 13))
+
+```
+
+
+### Missing data on extant and extinct populations
+
+We have NA in indicator PM because in some cases the number of extinct populations is unknown, therefore the operation cannot be computed. 
+
+### Counts
+Total records with NA in extant populations:
+```{r, echo=F, message=F, warning=F}
+sum(is.na(indicators_full$n_extant_populations))
+```
+
+Taxa with NA in extant populations:
+```{r, echo=F, message=F, warning=F}
+indicators_full %>%
+  filter(is.na(n_extant_populations)) %>%
+    select(taxonomic_group, taxon, n_extant_populations, n_extinct_populations)
+```
+
+Total taxa with NA in **extinct** populations:
+```{r, echo=F, message=F, warning=F}
+sum(is.na(indicators_full$n_extinct_populations))
+```
+
+Do taxa with NA for extant also have NA for extinct?
+
+```{r, echo=F, message=F, warning=F}
+indicators_full$taxon[is.na(indicators_full$n_extant_populations)] %in% indicators_full$taxon[is.na(indicators_full$n_extinct_populations)]
+```
+
+### Plot missing data extinct populations
+```{r, echo=F, message=F, warning=F}
+indicators_full %>%
+  ggplot(aes(x=taxonomic_group, fill=is.na(n_extinct_populations))) +
+  geom_bar() +
+  scale_fill_manual(labels=c("number of populations known", "missing data"),
+                    values=c("#2ca02c", "#ff7f0e")) + 
+  coord_flip() +
+  labs(fill="Extinct populations") +
+  xlab("") + ylab("Number of taxa") +
+  theme_light() +
+  theme(panel.border = element_blank())
+```
+
+
+### Ne > 500 indicator
+
+In total, there was data to compute the Ne indicator in the following number of taxa:
+
+```{r}
+sum(!is.na(indicators_full$indicatorNe))
+```
+
+Considering those `r sum(!is.na(indicators_full$indicatorNe))` taxa, the Ne indicator mean value for the country is:
+
+```{r, echo=F, message=F, warning=F}
+mean(indicators_full$indicatorNe, na.rm = TRUE)
+```
+
+
+### Ne > 500  by type of range
+
+By type of range in the entire dataset:
+
+```{r, echo=F, message=F, warning=F}
+# get sample size by desired category
+sample_size <- indicators_full  %>%
+                    filter(!is.na(indicatorNe)) %>% 
+                    group_by(species_range) %>% summarize(num=n())
+
+# plot
+indicators_full  %>% 
+  # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(species_range, " (n= ", num, ")")) %>%
+
+  # plot
+  ggplot(aes(x=myaxis, y=indicatorNe , fill=species_range)) +
+      geom_violin(width=1, linewidth = 0)  +
+      geom_jitter(size=.5, width = 0.1) +
+      xlab("") + ylab("Proportion of popuations with Ne > 500") +
+      coord_flip() +
+      theme_light() +
+      theme(panel.border = element_blank(), legend.position="none", text= element_text(size=20))
+```
+
+### Ne > 500 by IUCN status
+
+By global IUCN:
+
+```{r indicatorNe gobalIUCN, echo=F, message=F, warning=F}
+
+## Global IUCN
+## prepare data
+# add sampling size
+sample_size <- indicators_full %>%
+               filter(!is.na(indicatorNe)) %>% 
+               group_by(global_IUCN) %>% summarize(num=n())
+
+# new df 
+df<- indicators_full %>% 
+     filter(!is.na(indicatorNe)) %>% 
+        # add sampling size 
+        left_join(sample_size) %>%
+        mutate(myaxis = paste0(global_IUCN, " (n= ", num, ")"))
+
+
+# change order of levels so that they are in the desired order
+df$myaxis<-factor(df$myaxis, 
+                  #grep is used below to get the sample size, which may change depending on the data
+                  levels=c(grep("cr", unique(df$myaxis), value = TRUE),
+                          grep("en", unique(df$myaxis), value = TRUE),
+                          grep("vu", unique(df$myaxis), value = TRUE),
+                          grep("nt", unique(df$myaxis), value = TRUE),
+                          grep("lc", unique(df$myaxis), value = TRUE),
+                          grep("dd", unique(df$myaxis), value = TRUE),
+                          grep("not_assessed", unique(df$myaxis), value = TRUE),
+                          grep("unknown", unique(df$myaxis), value = TRUE)))
+
+df$global_IUCN<-factor(df$global_IUCN, levels=c("cr", "en", "vu", "nt", "lc", "dd", "not_assessed", "unknown"))
+
+
+      
+# plot
+df %>%
+    ggplot(aes(x=myaxis, y=indicatorNe , fill=global_IUCN)) +
+      geom_violin(width=1.5, linewidth = 0)  +
+      geom_jitter(size=.5, width = 0.1) +
+      xlab("") + ylab("Proportion of popuations with Ne > 500") +
+      coord_flip() +
+      scale_fill_manual(values= IUCNcolors, # iucn color codes
+                        breaks=c(levels(df$global_IUCN))) +
+      theme_light() +
+      ggtitle("global Red List") +
+      theme(panel.border = element_blank(), legend.position="none", text= element_text(size=15))
+
+```
+
+By regional IUCN (this may make no sense for your country if there is no IUCN redlist assessments at regional level:
+
+```{r, echo=F, message=F, warning=F}
+## Regional IUCN
+
+## prepare data
+# add sampling size
+sample_size <- indicators_full %>%
+               filter(!is.na(indicatorNe)) %>% 
+               group_by(regional_redlist) %>% summarize(num=n())
+
+# new df 
+df<- indicators_full %>% 
+     filter(!is.na(indicatorNe)) %>% 
+        # add sampling size 
+        left_join(sample_size) %>%
+        mutate(myaxis = paste0(regional_redlist, " (n= ", num, ")"))
+
+# change order of levels so that they are in the desired order
+df$myaxis<-factor(df$myaxis, 
+                  #grep is used below to get the sample size, which may change depending on the data
+                  levels=c(grep("re", unique(df$myaxis), value = TRUE),
+                          grep("cr", unique(df$myaxis), value = TRUE),
+                          grep("en", unique(df$myaxis), value = TRUE),
+                          grep("vu", unique(df$myaxis), value = TRUE),
+                          grep("nt", unique(df$myaxis), value = TRUE),
+                          grep("lc", unique(df$myaxis), value = TRUE),
+                          grep("dd", unique(df$myaxis), value = TRUE),
+                          grep("not_assessed", unique(df$myaxis), value = TRUE),
+                          grep("unknown", unique(df$myaxis), value = TRUE)))
+
+df$regional_redlist<-factor(df$regional_redlist, levels=c("re","cr", "en", "vu", "nt", "lc", "dd", "not_assessed", "unknown"))
+      
+# plot
+df %>%
+    ggplot(aes(x=myaxis, y=indicatorNe , fill=regional_redlist)) +
+      geom_violin(width=1, linewidth = 0)  +
+      geom_jitter(size=.5, width = 0.1) +
+      xlab("") + ylab("Proportion of popuations with Ne > 500") +
+      coord_flip() +
+      scale_fill_manual(values= IUCNcolors_regional, # iucn color codes
+                        breaks=c(levels(df$regional_redlist))) +
+      theme_light() +
+      ggtitle("regional Red List") +
+      theme(panel.border = element_blank(), legend.position="none", text= element_text(size=15))
+
+
+
+```
+### Ne > 500 by endemicity
+```{r, echo=F, message=F, warning=F}
+# get sample size by desired category
+sample_size <- indicators_full  %>%
+                    filter(!is.na(indicatorNe)) %>% 
+                    group_by(national_endemic) %>% summarize(num=n())
+
+# plot
+indicators_full  %>% 
+  # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(national_endemic, " (n= ", num, ")")) %>%
+
+  # plot
+  ggplot(aes(x=myaxis, y=indicatorNe , fill=national_endemic)) +
+      geom_violin(width=1, linewidth = 0)  +
+      geom_jitter(size=.5, width = 0.1) +
+      xlab("") + ylab("Proportion of popuations with Ne > 500") +
+      coord_flip() +
+      theme_light() +
+      theme(panel.border = element_blank(), legend.position="right", text= element_text(size=20))
+```
+
+
+### Distribution of Ne values
+
+How is Ne data distributed? 
+
+```{r, echo=F, message=F, warning=F}
+summary(indNe_data$Ne)
+```
+
+
+Boxplot of Ne values:
+```{r, echo=F, message=F, warning=F}
+indNe_data %>%
+  ggplot(aes(x=taxonomic_group, y=Ne)) +
+  geom_boxplot() + geom_point(aes(x=taxonomic_group, y=Ne))+
+theme_light()
+```
+
+Check outliers (Ne very high):
+
+```{r, echo=F, message=F, warning=F}
+indNe_data %>% 
+  filter(Ne > 100000) %>%
+  select(country_assessment, name_assessor, taxon, taxonomic_group, Ne, NeLower, NeUpper, multiassessment, population)
+```
+
+Ne Boxplot filtering outliers (if any)
+```{r, echo=F, message=F, warning=F}
+indNe_data %>% filter(Ne < 100000) %>%
+  ggplot(aes(x=taxonomic_group, y=Ne)) +
+  geom_boxplot() + geom_point(aes(x=taxonomic_group, y=Ne))+
+theme_light()
+```
+
+### Distribution of Nc values and ranges
+
+Point data
+```{r, echo=F, message=F, warning=F}
+indNe_data %>%
+  ggplot(aes(x=taxonomic_group, y=NcPoint)) +
+  geom_boxplot() + geom_point(aes(x=taxonomic_group, y=NcPoint))+
+theme_light()
+
+```
+
+Range data (categorical):
+
+```{r, echo=F, message=F, warning=F}
+# re-order levels
+backupt<-indNe_data
+indNe_data$NcRange<-as.factor(indNe_data$NcRange)
+table(indNe_data$NcRange)
+indNe_data$NcRange<-factor(indNe_data$NcRange, levels = c("less5000_bymuch", "less_5000", "range_includes_5000",
+                                "more_5000", "more_5000_bymuch"))
+
+indNe_data %>%
+  filter(!is.na(NcRange)) %>%
+  ggplot(aes(x=taxonomic_group, fill=NcRange)) +
+  geom_bar(position = "stack") +
+  coord_flip() +
+  scale_fill_manual(breaks = c("less5000_bymuch", "less_5000", "range_includes_5000",
+                                "more_5000", "more_5000_bymuch"),
+                    values = c("darkred", "red",
+                                 "orange",
+                                 "green", "darkgreen")) +
+theme_light()
+```
+
+
+
+
+### Proportion of populations mantained (PM indicator)
+
+#### Plot Proportion of populations mantained (PM indicator) by method
+```{r, echo=F, message=F, warning=F}
+# Prepare data for plot with nice labels:
+# sample size of TOTAL populations
+sample_size <- indicators_full %>%
+                    filter(!is.na(indicatorPM)) %>% 
+                    group_by(defined_populations) %>% summarize(num=n())
+
+# custom axis
+## new dataframe
+df<-indicators_full %>% 
+  filter(n_extant_populations<500) %>%
+  filter(!is.na(indicatorPM)) %>%
+    # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(defined_populations, " (n= ", num, ")"))
+
+
+
+## plot for indicator 2
+df %>%
+  filter(n_extant_populations<500) %>%
+  ggplot(aes(x=myaxis, y=indicatorPM, color=defined_populations)) +
+          geom_boxplot() + xlab("") + ylab("Proportion of maintained populations") +
+          geom_jitter(size=.4, width = 0.1, color="black") +
+  coord_flip() +
+  theme_light() +
+  theme(panel.border = element_blank(), legend.position="none") +
+  scale_x_discrete(limits=rev) +
+  theme(text = element_text(size = 13))
+
+
+```
+
+#### by type of range
+
+By type of range in the entire dataset:
+  
+```{r, echo=F, message=F, warning=F}
+# get sample size by desired category
+sample_size <- indicators_full  %>%
+  filter(!is.na(indicatorPM)) %>% 
+  group_by(species_range) %>% summarize(num=n())
+
+# plot
+indicators_full  %>% 
+  # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(species_range, " (n= ", num, ")")) %>%
+  
+  # plot
+  ggplot(aes(x=myaxis, y=indicatorPM , fill=species_range)) +
+  geom_violin(width=1, linewidth = 0)  +
+  geom_jitter(size=.5, width = 0.1) +
+  xlab("") + ylab("Proportion of pmaintained populations") +
+  coord_flip() +
+  theme_light() +
+  theme(panel.border = element_blank(), legend.position="none", text= element_text(size=20))
+```
+
+####  by IUCN status
+
+By global IUCN:
+
+```{r, echo=F, message=F, warning=F}
+
+## Global IUCN
+## prepare data
+# add sampling size
+sample_size <- indicators_full %>%
+  filter(!is.na(indicatorPM)) %>% 
+  group_by(global_IUCN) %>% summarize(num=n())
+
+# new df 
+df<- indicators_full %>% 
+  filter(!is.na(indicatorPM)) %>% 
+  # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(global_IUCN, " (n= ", num, ")"))
+
+
+# change order of levels so that they are in the desired order
+df$myaxis<-factor(df$myaxis, 
+                  #grep is used below to get the sample size, which may change depending on the data
+                  levels=c(grep("cr", unique(df$myaxis), value = TRUE),
+                           grep("en", unique(df$myaxis), value = TRUE),
+                           grep("vu", unique(df$myaxis), value = TRUE),
+                           grep("nt", unique(df$myaxis), value = TRUE),
+                           grep("lc", unique(df$myaxis), value = TRUE),
+                           grep("dd", unique(df$myaxis), value = TRUE),
+                           grep("not_assessed", unique(df$myaxis), value = TRUE),
+                           grep("unknown", unique(df$myaxis), value = TRUE)))
+
+df$global_IUCN<-factor(df$global_IUCN, levels=c("cr", "en", "vu", "nt", "lc", "dd", "not_assessed", "unknown"))
+
+
+
+# plot
+df %>%
+  ggplot(aes(x=myaxis, y=indicatorPM , fill=global_IUCN)) +
+  geom_violin(width=1.5, linewidth = 0)  +
+  geom_jitter(size=.5, width = 0.1) +
+  xlab("") + ylab("Proportion of mantained populations") +
+  coord_flip() +
+  scale_fill_manual(values= IUCNcolors, # iucn color codes
+                    breaks=c(levels(df$global_IUCN))) +
+  theme_light() +
+  ggtitle("global Red List") +
+  theme(panel.border = element_blank(), legend.position="none", text= element_text(size=15))
+
+```
+
+By regional IUCN (this may make no sense for your country if there is no IUCN redlist assessments at regional level:
+
+                    
+```{r indicatorPM, echo=F, message=F, warning=F}
+                  ## Regional IUCN
+                  
+                  ## prepare data
+                  # add sampling size
+                  sample_size <- indicators_full %>%
+                    filter(!is.na(indicatorPM)) %>% 
+                    group_by(regional_redlist) %>% summarize(num=n())
+                  
+                  # new df 
+                  df<- indicators_full %>% 
+                    filter(!is.na(indicatorPM)) %>% 
+                    # add sampling size 
+                    left_join(sample_size) %>%
+                    mutate(myaxis = paste0(regional_redlist, " (n= ", num, ")"))
+                  
+                  # change order of levels so that they are in the desired order
+                  df$myaxis<-factor(df$myaxis, 
+                                    #grep is used below to get the sample size, which may change depending on the data
+                                    levels=c(grep("re", unique(df$myaxis), value = TRUE),
+                                             grep("cr", unique(df$myaxis), value = TRUE),
+                                             grep("en", unique(df$myaxis), value = TRUE),
+                                             grep("vu", unique(df$myaxis), value = TRUE),
+                                             grep("nt", unique(df$myaxis), value = TRUE),
+                                             grep("lc", unique(df$myaxis), value = TRUE),
+                                             grep("dd", unique(df$myaxis), value = TRUE),
+                                             grep("not_assessed", unique(df$myaxis), value = TRUE),
+                                             grep("unknown", unique(df$myaxis), value = TRUE)))
+                  
+                  df$regional_redlist<-factor(df$regional_redlist, levels=c("re","cr", "en", "vu", "nt", "lc", "dd", "not_assessed", "unknown"))
+                  
+                  # plot
+                  df %>%
+                    ggplot(aes(x=myaxis, y=indicatorPM , fill=regional_redlist)) +
+                    geom_violin(width=1, linewidth = 0)  +
+                    geom_jitter(size=.5, width = 0.1) +
+                    xlab("") + ylab("Proportion of mantained populations") +
+                    coord_flip() +
+                    scale_fill_manual(values= IUCNcolors_regional, # iucn color codes
+                                      breaks=c(levels(df$regional_redlist))) +
+                    theme_light() +
+                    ggtitle("regional Red List") +
+                    theme(panel.border = element_blank(), legend.position="none", text= element_text(size=15))
+                  
+                  
+                  
+```
+
+#### Proportion of maintained populations by endemicity
+
+```{r, echo=F, message=F, warning=F}
+# get sample size by desired category
+sample_size <- indicators_full  %>%
+                    filter(!is.na(indicatorPM)) %>% 
+                    group_by(national_endemic) %>% summarize(num=n())
+
+# plot
+indicators_full  %>% 
+  # add sampling size 
+  left_join(sample_size) %>%
+  mutate(myaxis = paste0(national_endemic, " (n= ", num, ")")) %>%
+
+  # plot
+  ggplot(aes(x=myaxis, y=indicatorPM , fill=national_endemic)) +
+      geom_violin(width=1, linewidth = 0)  +
+      geom_jitter(size=.5, width = 0.1) +
+      xlab("") + ylab("Proportion of popuations with Ne > 500") +
+      coord_flip() +
+      theme_light() +
+      theme(panel.border = element_blank(), legend.position="right", text= element_text(size=20))
+```
+
+#### Plot Scatter plot of indicatorPM and extant pops
+
+```{r, echo=F, message=F, warning=F}
+indicators_full %>%
+  filter(!is.na(indicatorPM)) %>%
+  # filter outliers with too many pops
+  # filter(n_extant_populations<200) %>%
+  
+  # plot
+    ggplot(aes(x=n_extant_populations, y=indicatorPM, color=defined_populations)) +
+    geom_point() +
+    theme_light() +
+    theme(legend.position = "bottom") +
+    ylab("Proportion of maintained populations") +
+    xlab("Number of mantained populations") +
+    theme(text = element_text(size = 13))
+```

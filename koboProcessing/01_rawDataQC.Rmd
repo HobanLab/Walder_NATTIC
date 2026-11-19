@@ -1,0 +1,291 @@
+---
+title: "Data exploration and cleaning"
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+  pdf_document: default
+---
+
+This notebook looks for common sources of error and flags those records manual revision by the assessors who capture data from each country. ACK adapted this from the original Gingko code.
+
+The output are:
+* a report of the quality check
+* A .csv file (called ´kobo_output_tocheck.csv´) showing **the records that need manual review or corrections**, if any.
+* A .csv file (called ´kobo_output_clean.csv´) with the data after processing (**records flagged in the previous file may or may not be included according to user choice**).
+
+## Libraries and functions
+
+Load required libraries:
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyr)
+library(dplyr)
+library(utile.tools)
+library(stringr)
+library(ggplot2)
+```
+
+Useful custom functions
+
+```{r}
+# "Not in" function
+"%!in%" <- function(x, y)!('%in%'(x,y))
+```
+
+## Variables that need to be set by the user
+
+Output from KoboToolbox in .csv format as downloaded using [these instructions](https://ccgenetics.github.io/guidelines-genetic-diversity-indicators/docs/5_Data_collection/Kobo_toolbox_help.html). 
+
+```{r}
+kobo_file="koboForms/NATTIC_KOBO_2026-11-13.csv"
+```
+Should records that need manual review and potentially correction be removed or kept in the exported "clean" data?. True to keep, false to filter them. Defaults to FALSE
+```{r}
+keep_to_check=TRUE #true to keep, false to filter them. Defaults to FALSE
+```
+
+## Get data
+
+Get Kobo raw output data:
+```{r}
+# kobo_file variable is defined at the start of this script; it should be csv file
+kobo_output<-read.csv(file=kobo_file, sep=";", header=TRUE) %>%
+
+# Add  taxon column, which is a combination of genus and species names
+mutate(taxon=(utile.tools::paste(genus, species, subspecies_variety, na.rm=TRUE))) %>%
+    # remove white space at the end of the name
+    mutate(taxon=str_trim(taxon, "right"))
+```
+Filter out records which were marked as "not_approved" in the manual Kobo validation interface (this means country assessors determined the is something wrong with that particular record).
+
+NOTE: These lines are leading to the loss of all data in the `kobo_output` object--so, commenting out for now.
+```{r}
+# # check if any species is flagged as "validation_status_not_approved"
+# kobo_output %>%
+#       filter(X_validation_status=="validation_status_not_approved")  %>%
+#             select(country_assessment, name_assessor, taxon)
+# 
+# # omit those records from data:
+# kobo_output<- kobo_output %>%
+#             filter(X_validation_status!="validation_status_not_approved")
+
+```
+
+### Filter out any sort of tests
+```{r}
+# Select likely columns to say "test"
+cols= c("name_assessor", "email_assessor", "genus", "species", "subspecies_variety",
+         "scientific_authority", "common_name", "GBIF_taxonID", "NCBI_taxonID")
+
+# Check for "test" or "template" in any of the selected columns
+kobo_output %>% 
+  filter(if_any(all_of(cols), ~ grepl("test", .)) |
+         if_any(all_of(cols), ~ grepl("Template", .)))  %>% 
+  select(country_assessment, name_assessor, genus, species)
+
+# Filter them out of dataset
+kobo_output<- kobo_output %>% 
+              filter(if_any(all_of(cols), ~ !grepl("test", .))) %>% 
+              filter(genus!="Template")
+```
+
+### Filter out species no longer included in final species list
+These species were assessed early on in the project, but we ultimately decided to not include them.
+
+```{r}
+# Specify excluded taxa
+excludedTaxa <- 
+  c("Betula murrayana", "Conocarpus erectus", "Guaiacum officinale",
+    "Mespilus canescens", "Mosiera longipes", "Pteralyxia kauaiensis",
+    "Quercus graciliformis", "Zanthoxylum fagara")
+# Filter these out of the dataset
+kobo_output <- kobo_output %>% 
+  filter(!taxon %in% excludedTaxa)
+```
+
+## Check for common data capture errors
+
+### Number of populations
+In the form, -999 was used to mark taxa with unknown number of extant or extinct populations. This was used because answering the question was mandatory, so leaving it blank wasn't possible. 
+The first change to make is to see if anyone mistyped -999, for these fields. We check any values over 900.
+
+```{r}
+# Correct extant populations
+kobo_output <- kobo_output %>%
+  mutate(n_extant_populations = if_else(n_extant_populations > 900, -999, n_extant_populations))
+# Correct extinct populations
+kobo_output <- kobo_output %>%
+  mutate(n_extinct_populations = if_else(n_extinct_populations > 900, -999, n_extinct_populations))
+```
+
+Next, we have to change all -999 instances to NA.
+
+```{r}
+kobo_output<-kobo_output %>%
+             mutate(n_extant_populations= na_if(n_extant_populations, -999))
+kobo_output<-kobo_output %>%
+             mutate(n_extinct_populations= na_if(n_extinct_populations, -999))
+```
+
+We can now explore how many populations per species are still extant 
+
+```{r}
+summary(kobo_output$n_extant_populations)
+table(kobo_output$n_extant_populations)
+```
+
+Plot histogram
+```{r}
+ggplot(kobo_output, aes(x=n_extant_populations))+
+      geom_histogram()
+```
+
+Zoom Plot histogram
+```{r}
+kobo_output %>%
+    filter(n_extant_populations>=0, n_extant_populations<25) %>%
+
+ggplot(., aes(x=n_extant_populations))+
+      geom_histogram()
+```
+
+Once -999 was replaced by NA there should be no negative number of populations (if they are, they are typos that need to be corrected).
+```{r}
+kobo_output %>%
+      filter(n_extant_populations<0) %>%
+      select(country_assessment, taxon, name_assessor, n_extant_populations, n_extinct_populations)
+```
+
+Show which taxa (if any) have 0 (zero) extant populations. **Is this correct? needs to be manually checked**
+```{r}
+kobo_output %>%
+      filter(n_extant_populations==0) %>%
+      select(country_assessment, taxon, name_assessor, n_extant_populations, n_extinct_populations)
+```
+
+Show which species (if any) have 999 extant populations. **Should this be -999? OR n_extinct pops??**
+```{r}
+kobo_output %>%
+      filter(n_extant_populations==999) %>%
+      select(country_assessment, taxon, name_assessor, n_extant_populations, n_extinct_populations)
+```
+
+Show which species (if any) have 999 EXTINCT populations. **Should this be -999?**
+```{r}
+kobo_output %>%
+      filter(n_extinct_populations==999) %>%
+      select(country_assessment, taxon, name_assessor, n_extant_populations, n_extinct_populations)
+```
+Put all taxa with weird number of populations that need to be checked together:
+
+```{r}
+check_n_pops <- kobo_output %>% 
+      # variables of interest
+      select(country_assessment, name_assessor, taxon, n_extant_populations, n_extinct_populations) %>%
+
+      # same filters that discussed above
+      filter(n_extant_populations<0 |
+            n_extant_populations==0 | 
+            n_extant_populations==999 | 
+            n_extinct_populations==999) %>% 
+
+# add a column stating what needs to be checked:
+       mutate(need_to_check="check number of extant or extint populations. Are 0 correct? should 999 be -999? are extant/extint confused?")
+```
+
+
+### GBIF ID codes 
+
+Check GBIF 
+```{r}
+# check IDs
+head(kobo_output$GBIF_taxonID)
+```
+
+GBIF IDs tend to be 7 characters long. Some can be larger or shorter, but these seem to be exceptions. Therefore let's flag any records where the GBIF Id is =/= 7 to manually check if it is correct.
+
+```{r}
+kobo_output %>%
+            filter(nchar(GBIF_taxonID)>0, nchar(GBIF_taxonID)!=7) %>%
+  # show only relevant columns
+            select(country_assessment, name_assessor, taxon, GBIF_taxonID)
+```
+
+Put them in their own happy df with a column stating what is the likely problem:
+
+```{r}
+check_GBIF <- kobo_output %>%
+              filter(nchar(GBIF_taxonID)>0, nchar(GBIF_taxonID)!=7) %>%
+  # show only relevant columns
+            select(country_assessment, name_assessor, taxon, GBIF_taxonID) %>%
+# add a column stating what needs to be checked:
+
+       mutate(need_to_check="check the GBIF taxonID. Either it looks plain different, or has more or less than 7 digits (most ids are 7 digits long, and this isn't, it could be an exception, or a mistake).")
+```
+
+### Species names
+
+Genus, species and subspecies should be a single word, check if there are cases where it isn't. Only exception would be "var." or "subsp." in the subspecies_variety field: 
+
+```{r}
+kobo_output %>% 
+  filter(grepl(" ", genus) | 
+         grepl(" ", species) | 
+         grepl(" ", subspecies_variety)) %>%
+   filter(!grepl("var.", subspecies_variety)) %>%
+   filter(!grepl("subsp.", subspecies_variety)) %>%
+  # show only relevant columns
+            select(country_assessment, name_assessor, taxon, genus, species, subspecies_variety)
+
+```
+Put them in their own happy df with a column stating what is the likely problem:
+
+```{r}
+check_taxon_names <- kobo_output %>% 
+  filter(grepl(" ", genus) | 
+         grepl(" ", species) | 
+         grepl(" ", subspecies_variety)) %>%
+   filter(!grepl("var.", subspecies_variety)) %>%
+   filter(!grepl("subsp.", subspecies_variety)) %>%
+  # show only relevant columns
+            select(country_assessment, name_assessor, taxon, genus, species, subspecies_variety) %>%
+       mutate(need_to_check="check genus, species or subspecies_variety, we are targeting to have single words in each field, except in the ifraspecific names, where 'var.' and 'subsp.' (only) would be accepted. Other details or taxonomic notes should be added in the comments.")
+```
+
+## Create a single file for assessors review:
+
+```{r}
+to_check<-full_join(check_n_pops, check_GBIF) %>% full_join(check_taxon_names) %>%
+  # show columns in desired order:
+select(country_assessment, name_assessor, taxon, need_to_check, n_extant_populations,
+         n_extinct_populations, GBIF_taxonID, genus, species, subspecies_variety)
+
+# save file:
+write.csv(to_check, "kobo_output_tocheck.csv", row.names = FALSE, fileEncoding = "UTF-8")
+
+```
+
+## Save the clean koboutput version, removing any taxa with issues:
+
+Asks the user if they want to keep the taxa flagged in the previous step, or if they should be filtered out.
+
+```{r}
+# keep_to_check variable is defined at the start of the script. It should be TRUE/FALSE
+if(keep_to_check==FALSE){
+# Remove from the clean version any remaining taxa with issues
+kobo_clean<-kobo_output %>%
+            filter(taxon %!in% to_check$taxon)
+print(paste("A total of", nrow(to_check), "records were excluded from the cleaned data"))
+# Export clean version
+write.csv(kobo_clean, "kobo_output_clean.csv", row.names = FALSE, fileEncoding = "UTF-8")
+} else {
+write.csv(kobo_output, "kobo_output.csv", row.names = FALSE, fileEncoding = "UTF-8")
+}
+```
+
+Session Info for reproducibility purposes:
+
+```{r}
+sessionInfo()
+```
