@@ -4,7 +4,6 @@ output: html_document
 ---
 
 ## Packages and functions
-
 Load required libraries:
 
 ```{r, warning=FALSE, message=FALSE}
@@ -22,13 +21,10 @@ Other custom functions:
 ```{r custom_funs}
 ### not in
 '%!in%' <- function(x,y)!('%in%'(x,y))
-
 ```
-
 
 ## Get data 
 Get clean data (output of step 2) ready to estimate the indicators:
-
 ```{r, echo=TRUE}
 # Get data:
 indNe_data<-read.csv("indNe_data.csv")
@@ -37,9 +33,7 @@ indDNAbased_data<-read.csv("indDNAbased_data.csv")
 metadata<-read.csv("metadata.csv")
 ```
 
-
 ## Estimate the indicators
-
 ### Ne 500 indicator 
 
 The Ne 500 indicator es estimated by dividing  "the number of populations whithin a species with Ne > 500" over "the number of populations within a species with data to estimate Ne".
@@ -47,17 +41,16 @@ The Ne 500 indicator es estimated by dividing  "the number of populations whithi
 Here the indicator is estimated not by taxon but by X_uuid (unique record of a taxon), because a single taxon could be assessed by different countries or more than once with different parameters)  
 
 See the function to estimate the indicator:
-
 ```{r}
 estimate_indicatorNe
 ```
 
 ```{r}
-indicatorNe<-estimate_indicatorNe(indNe_data=indNe_data)
+indicatorNe <- estimate_indicatorNe(indNe_data=indNe_data)
 ```
 ### PM indicator 
 
-The Proportion of Maintained populations (PM indicator) is the he proportion of populations within species which are maintained. This can be estimated based on the ´n_extant_populations´ and ´n_extinct_populations´, as follows:
+The Proportion of Maintained populations (PM indicator) is the proportion of populations within species which are maintained. This can be estimated based on the ´n_extant_populations´ and ´n_extinct_populations´, as follows:
 
 ```{r}
 # create a copy of the PM data
@@ -65,7 +58,6 @@ indicatorPM<-indPM_data
 
 # calculate the indicator and save it as a new column along with the rest of the PM data
 indicatorPM$indicatorPM<-indicatorPM$n_extant_populations / (indicatorPM$n_extant_populations + indicatorPM$n_extinct_populations)
-
 ```
 
 Example output selecting the most relevant columns:
@@ -75,9 +67,7 @@ indicatorPM %>% select(country_assessment, taxon, n_extant_populations, n_extinc
 ```
 
 ### DNA-based genetic monitoring indicator 
-
 This indicator refers to the number (count) of taxa by country in which genetic monitoring based on DNA-methods is occurring. This is stored in the variable ´temp_gen_monitoring´ as a “yes/no” answer for each taxon, so to estimate the indicator, we only need to count how many said “yes”, keeping only one of the records when the taxon was multiassessed.
-
 
 ```{r}
 indicatorDNAbased<-indDNAbased_data %>%
